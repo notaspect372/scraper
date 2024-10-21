@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 from geopy.geocoders import Nominatim
 import time
+import os
 
 # Headers to mimic browser requests
 headers = {
@@ -149,10 +150,18 @@ def parse_page(url, property_type, items):
 def save_to_excel(base_url, items):
     parsed_url = urlparse(base_url)
     safe_filename = re.sub(r'\W+', '_', parsed_url.netloc + parsed_url.path) + '.xlsx'
-    df = pd.DataFrame(items)
-    df.to_excel(safe_filename, index=False)
+    
+    # Ensure artifacts directory exists
+    output_directory = "artifacts"
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+    
+    safe_filepath = os.path.join(output_directory, safe_filename)
 
-    wb = load_workbook(safe_filename)
+    df = pd.DataFrame(items)
+    df.to_excel(safe_filepath, index=False)
+
+    wb = load_workbook(safe_filepath)
     ws = wb.active
 
     for cell in ws[1]:
@@ -170,8 +179,7 @@ def save_to_excel(base_url, items):
         adjusted_width = (max_length + 2)
         ws.column_dimensions[column].width = adjusted_width
 
-    wb.save(safe_filename)
-
+    wb.save(safe_filepath)
 def determine_property_type(url):
     if 'residential' in url or 'commercial' in url:
         return 'residential' if 'residential' in url else 'commercial'
