@@ -1,199 +1,282 @@
+import os
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
-import math
-import re
-from urllib.parse import urlparse
-from openpyxl import load_workbook
-from openpyxl.styles import Font
 from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut
+import pandas as pd
+import re
 import time
-import os
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-# Headers to mimic browser requests
+# Function to create a requests session with retries
+def requests_session_with_retries():
+    session = requests.Session()
+    retries = Retry(total=5, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504])
+    session.mount('http://', HTTPAdapter(max_retries=retries))
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+    return session
+
+# Create a session with retries
+session = requests_session_with_retries()
+
+# Headers with more fields to avoid 400 errors
 headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'}
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36',
+    'Referer': 'https://www.buysellcyprus.com',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+}
 
-# Initialize geolocator
-geolocator = Nominatim(user_agent="property_scraper")
+# Delay between requests
+delay_between_requests = 2  # seconds
 
-start_urls = [
-    "https://www.bproperty.com/buy/residential/apartments/?price=4800000-5950000",
-    "https://www.bproperty.com/buy/residential/apartments/?price=5950000-6995555",
-    "https://www.bproperty.com/buy/residential/apartments/?price=6995555-8000000",
-    "https://www.bproperty.com/buy/residential/apartments/?price=8000000-9500000",
-    "https://www.bproperty.com/buy/residential/apartments/?price=9500000-12000000",
-    "https://www.bproperty.com/buy/residential/apartments/?price=12000000-17000000",
-    "https://www.bproperty.com/buy/residential/apartments/?price=above-17000000",
-    "https://www.bproperty.com/buy/residential/residential-duplex/",
-    "https://www.bproperty.com/buy/residential/residential-buildings/",
-    "https://www.bproperty.com/buy/residential/residential-plots/",
-    "https://www.bproperty.com/rent/commercial/under-70000/",
-    "https://www.bproperty.com/rent/commercial/?price=70000-250000",
-    "https://www.bproperty.com/rent/commercial/?price=above-250000",
-]
+# Create an artifacts directory if it doesn't exist
+if not os.path.exists("artifacts"):
+    os.makedirs("artifacts")
 
-# Function to perform requests with manual retry logic
-def get_with_retry(url, retries=5, delay=2):
-    attempt = 0
-    while attempt < retries:
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                return response
-            else:
-                print(f"Failed with status code {response.status_code}. Retrying...")
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching {url}: {e}. Retrying...")
-        attempt += 1
-        time.sleep(delay)  # Delay between retries
-    return None
+def get_property_links_from_page(url):
+    """Get property links from a single page."""
+    try:
+        response = session.get(url, timeout=10, headers=headers)  # Add headers
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to retrieve the page {url}. Error: {e}")
+        return set()
+
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    # Find all property links
+    property_links = set()
+    for div in soup.find_all('div', class_='bs-card-title'):
+        a = div.find('a', href=True)
+        if a:
+            href = a['href']
+            if 'property' in href:
+                full_url = 'https://www.buysellcyprus.com' + href if href.startswith('/') else href
+                property_links.add(full_url)
+    return property_links
 
 def get_total_pages(url):
+    """Get the total number of pages from the first page."""
     try:
-        response = get_with_retry(url)
-        if response is None:
-            return 1
-        soup = BeautifulSoup(response.content, 'html.parser')
-        total_listing_selector = 'span.CountTitle-number'
-        total_listing_text = soup.select_one(total_listing_selector).get_text(strip=True).split()[0]
-        total_listing = int(total_listing_text.replace(',', ''))
-        page_listing = 30  # Assuming 30 listings per page
-        total_pages = math.ceil(total_listing / page_listing)
-        return total_pages
-    except Exception as e:
-        print(f"Error fetching total pages for {url}: {e}")
+        response = session.get(url, timeout=10, headers=headers)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to retrieve the page {url}. Error: {e}")
         return 1
 
-def get_geolocation(address):
+    soup = BeautifulSoup(response.content, 'html.parser')
+    paging_div = soup.find('div', class_='paging-text paging-number')
+    if paging_div:
+        paging_text = paging_div.get_text(strip=True)
+        if 'of' in paging_text:
+            total_pages = int(paging_text.split('of')[-1].strip())
+            return total_pages
+    return 1
+
+def get_property_data(url):
+    """Scrape detailed property data from a given property URL."""
+    try:
+        response = session.get(url, timeout=10, headers=headers)
+        response.raise_for_status()  # Raise HTTPError for bad responses
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to retrieve the property page {url}. Error: {e}")
+        return None
+
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    # Extract name
+    name_meta = soup.find('meta', property='og:title')
+    name = name_meta['content'] if name_meta else 'N/A'
+
+    # Extract price
+    price_div = soup.find('div', class_='bs-listing-info-price')
+    price = 'N/A'
+    if price_div:
+        price_span = price_div.find('span', class_='bs-listing-info-price-base')
+        price = price_span.get_text(strip=True) if price_span else 'N/A'
+
+    # Extract address
+    address_meta = soup.find('meta', itemprop='streetAddress')
+    address = address_meta['content'].replace('Cyprus', '').strip() if address_meta else 'N/A'
+
+    # Fallback for address if it's missing
+    if address == 'N/A':
+        address_fallback = soup.find('div', class_='fallback-address-class')
+        if address_fallback:
+            address = address_fallback.get_text(strip=True)
+
+    # Extract description
+    description_div = soup.find('div', class_='bs-listing-info-description-main')
+    description = 'N/A'
+    if description_div:
+        description_p = description_div.find('p', class_='description-text')
+        description = description_p.get_text(strip=True) if description_p else 'N/A'
+
+    # Extract characteristics
+    characteristics = {}
+    characteristics_div = soup.find('div', class_='bs-listing-info-features-main')
+    if characteristics_div:
+        characteristics_list = characteristics_div.find_all('li')
+        for item in characteristics_list:
+            key_value = item.get_text(strip=True).split(':')
+            if len(key_value) == 2:
+                key = key_value[0].strip()
+                value = key_value[1].strip()
+                characteristics[key] = value
+
+    # Determine property type
+    property_type = ''
+  keywords = [
+        'Apartment',
+        'House',
+        'Apartment Building',
+        'Bar',
+        'Block of flat',
+        'Building',
+        'Business Park',
+        'Cafe',
+        'Childcare Facility',
+        'Commercial Building',
+        'Commercial Development',
+        'Convenience Store',
+        'Data Center',
+        'Distribution Warehouse',
+        'Factory',
+        'Farm',
+        'Garage',
+        'Guest House',
+        'Hairdresser/Barber Shop',
+        'Healthcare Facility',
+        'Heavy Industrial',
+        'High Street Retail Property',
+        'Hotel',
+        'Hotel Apartment',
+        'Industrial Development',
+        'Industrial Park',
+        'Leisure Facility',
+        'Marine Property',
+        'Mill',
+        'Mixed Use Project',
+        'Nightclub',
+        'Office',
+        'Out of Town Retail Property',
+        'Petrol Station',
+        'Place of Worship',
+        'Post Office',
+        'Pub',
+        'Research Development Facility',
+        'Residential Development',
+        'Restaurant',
+        'Science Park',
+        'Serviced Office',
+        'Shop',
+        'Shopping center',
+        'Shopping mall',
+        'Showroom',
+        'Storage',
+        'Trade counter',
+        'Warehouse',
+        'Workshop',
+        'Bank Owned',
+        'Land',
+        'Residential',
+        'Commercial',
+        'Tourist',
+        'Industrial',
+        'Agricultural',
+        'Farm',
+        'Other',
+        'Building',
+        'Office',
+        'Shop',
+        'Hotel',
+        'Commercial'
+    ]
+
+    name_lower = name.lower()
+    for keyword in keywords:
+        if keyword.lower() in name_lower:
+            property_type = keyword
+            break
+
+    # Extract transaction type from URL
+    transaction_type = 'rent' if 'for-rent' in url else 'buy'
+
+    # Extract area
+    area = characteristics.get('Total covered area', characteristics.get('Plot', 'N/A'))
+
+    # Get latitude and longitude
+    geolocator = Nominatim(user_agent="property_scraper")
+    latitude, longitude = 'N/A', 'N/A'
     try:
         location = geolocator.geocode(address, timeout=10)
         if location:
-            return location.longitude, location.latitude
-        return None, None
-    except Exception as e:
-        print(f"Error getting geolocation for address {address}: {e}")
-        return None, None
+            latitude, longitude = location.latitude, location.longitude
+    except GeocoderTimedOut:
+        print(f"Geocoding timed out for address: {address}")
 
-def parse_property(url, property_type):
-    try:
-        response = get_with_retry(url)
-        if response is None:
-            return None
-        soup = BeautifulSoup(response.content, 'html.parser')
-        item = {}
+    # Combine all data into a dictionary
+    property_data = {
+        'url': url,
+        'name': name,
+        'address': address,
+        'price': price,
+        'description': description,
+        'property_type': property_type,
+        'transaction_type': transaction_type,
+        'area': area,
+        'characteristics': characteristics,
+        'latitude': latitude,
+        'longitude': longitude,
+    }
+    return property_data
 
-        name_selector = 'h1.Title-pdp-title span'
-        price_selector = 'span.FirstPrice'
-        description_selector = 'div.ViewMore-text-description'
+def scrape_properties(base_url):
+    # Get the total number of pages
+    total_pages = get_total_pages(base_url.format(1))
+    print(f"Total number of pages: {total_pages}")
 
-        item['name'] = soup.select_one(name_selector).get_text(strip=True) if soup.select_one(name_selector) else ''
-        address = soup.find('p', class_='Location')
-        item['address'] = address.text.strip() if address else 'N/A'
-        item['price'] = soup.select_one(price_selector).get_text(strip=True) if soup.select_one(price_selector) else ''
-        item['description'] = soup.select_one(description_selector).get_text(strip=True) if soup.select_one(description_selector) else ''
+    # Collect property links from all pages
+    all_property_links = set()
+    for page in range(1, total_pages + 1):
+        page_url = base_url.format(page)
+        property_links = get_property_links_from_page(page_url)
+        all_property_links.update(property_links)
+        print(f"Scraped {len(property_links)} properties from page {page}")
+        time.sleep(delay_between_requests)  # Delay between page requests
 
-        characteristics = {}
-        characteristics_container = soup.find('div', class_='listing-section listing-details')
-        if characteristics_container:
-            details_rows = characteristics_container.find_all('div', class_='columns-2')
-            for row in details_rows:
-                label_div = row.find('div', class_='listing-details-label')
-                value_div = row.find('div', class_='last')
-                if label_div and value_div:
-                    label = label_div.get_text(strip=True).lower().replace(' ', '_')
-                    value = value_div.get_text(strip=True)
-                    characteristics[label] = value
+    # Scrape data from each property URL
+    all_property_data = []
+    for link in all_property_links:
+        property_data = get_property_data(link)
+        print(property_data)
+        if property_data:
+            all_property_data.append(property_data)
+            print(f"Scraped data for property: {property_data['name']}")
+            time.sleep(delay_between_requests)  # Delay between property requests
 
-        item['characteristics'] = characteristics
-        item['area'] = characteristics.get('floor_area(sqft)', 'N/A')
+    return all_property_data
 
-        # Transaction type
-        if 'buy' in url:
-            item['transaction_type'] = 'for sale'
-        elif 'rent' in url:
-            item['transaction_type'] = 'for rent'
-        else:
-            item['transaction_type'] = 'unknown'
+def main(urls):
+    for url in urls:
+        base_url = re.sub(r'page-\d+', 'page-{}', url)
+        property_data = scrape_properties(base_url)
 
-        # Use provided property type
-        item['property_type'] = property_type
-        item['property_url'] = url
+        # Create a DataFrame to display the data side by side
+        df = pd.DataFrame(property_data)
+        print(df)
 
-        address = item.get('address', '')
-        longitude, latitude = get_geolocation(address)
-        item['longitude'] = longitude
-        item['latitude'] = latitude
+        # Save the DataFrame to an Excel file in the 'artifacts' directory
+        file_name = 'artifacts/' + re.sub(r'\W+', '_', url) + '.xlsx'
+        df.to_excel(file_name, index=False)
+        print(f"Data saved to {file_name}")
 
-        print(item)
-        return item
-    except Exception as e:
-        print(f"Error parsing property data from {url}: {e}")
-        return None
-
-def parse_page(url, property_type, items):
-    try:
-        response = get_with_retry(url)
-        if response is None:
-            return
-        soup = BeautifulSoup(response.content, 'html.parser')
-        property_url_selector = 'a.ListingCell-ListingLink.js-listing-link'
-        property_urls = [a['href'] for a in soup.select(property_url_selector)]
-        for property_url in property_urls:
-            item = parse_property(property_url, property_type)
-            if item:
-                items.append(item)
-        time.sleep(2)  # Adding delay to mimic human interaction
-    except Exception as e:
-        print(f"Error parsing page {url}: {e}")
-
-def save_to_excel(base_url, items):
-    parsed_url = urlparse(base_url)
-    safe_filename = re.sub(r'\W+', '_', parsed_url.netloc + parsed_url.path) + '.xlsx'
-    
-    # Ensure artifacts directory exists
-    output_directory = "artifacts"
-    if not os.path.exists(output_directory):
-        os.makedirs(output_directory)
-    
-    safe_filepath = os.path.join(output_directory, safe_filename)
-
-    df = pd.DataFrame(items)
-    df.to_excel(safe_filepath, index=False)
-
-    wb = load_workbook(safe_filepath)
-    ws = wb.active
-
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-
-    for col in ws.columns:
-        max_length = 0
-        column = col[0].column_letter
-        for cell in col:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(cell.value)
-            except:
-                pass
-        adjusted_width = (max_length + 2)
-        ws.column_dimensions[column].width = adjusted_width
-
-    wb.save(safe_filepath)
-def determine_property_type(url):
-    if 'residential' in url or 'commercial' in url:
-        return 'residential' if 'residential' in url else 'commercial'
-    return 'unknown'
-
-def main():
-    for url in start_urls:
-        property_type = determine_property_type(url)
-        total_pages = get_total_pages(url)
-        items = []
-        for page in range(1, total_pages + 1):
-            parse_page(f"{url}?page={page}", property_type, items)
-            time.sleep(1)  # To prevent rate limiting
-        save_to_excel(url, items)
+# List of URLs to scrape
+urls = [
+    'https://www.buysellcyprus.com/properties-for-sale/cur-usd/sort-ru/page-1',
+]
 
 if __name__ == "__main__":
-    main()
+    main(urls)
