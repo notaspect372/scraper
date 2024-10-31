@@ -191,10 +191,12 @@ def main(urls):
         df = pd.DataFrame(property_data)
         print(df)
 
-        # Save each DataFrame as an Excel file in the artifacts directory
-        file_name = f"artifacts/{re.sub(r'\\W+', '_', url)}.xlsx"
-        df.to_excel(file_name, index=False)
-        print(f"Data saved to {file_name}")
+        os.makedirs("artifacts", exist_ok=True)  # Ensure the directory exists
+        safe_filename = re.sub(r'[^\w\-_\. ]', '_', main_url)
+        filename = os.path.join("artifacts", f"{safe_filename}.xlsx")
+        
+        df = pd.DataFrame(scraped_data)
+        df.to_excel(filename, index=False)
 
 # List of URLs to scrape
 urls = [
