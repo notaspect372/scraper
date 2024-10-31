@@ -31,22 +31,16 @@ headers = {
 # Delay between requests
 delay_between_requests = 2  # seconds
 
-# Create an artifacts directory if it doesn't exist
-if not os.path.exists("artifacts"):
-    os.makedirs("artifacts")
-
 def get_property_links_from_page(url):
     """Get property links from a single page."""
     try:
-        response = session.get(url, timeout=10, headers=headers)  # Add headers
+        response = session.get(url, timeout=10, headers=headers)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"Failed to retrieve the page {url}. Error: {e}")
         return set()
 
     soup = BeautifulSoup(response.content, 'html.parser')
-
-    # Find all property links
     property_links = set()
     for div in soup.find_all('div', class_='bs-card-title'):
         a = div.find('a', href=True)
@@ -79,7 +73,7 @@ def get_property_data(url):
     """Scrape detailed property data from a given property URL."""
     try:
         response = session.get(url, timeout=10, headers=headers)
-        response.raise_for_status()  # Raise HTTPError for bad responses
+        response.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"Failed to retrieve the property page {url}. Error: {e}")
         return None
@@ -100,8 +94,6 @@ def get_property_data(url):
     # Extract address
     address_meta = soup.find('meta', itemprop='streetAddress')
     address = address_meta['content'].replace('Cyprus', '').strip() if address_meta else 'N/A'
-
-    # Fallback for address if it's missing
     if address == 'N/A':
         address_fallback = soup.find('div', class_='fallback-address-class')
         if address_fallback:
@@ -128,73 +120,7 @@ def get_property_data(url):
 
     # Determine property type
     property_type = ''
-    keywords = [
-        'Apartment',
-        'House',
-        'Apartment Building',
-        'Bar',
-        'Block of flat',
-        'Building',
-        'Business Park',
-        'Cafe',
-        'Childcare Facility',
-        'Commercial Building',
-        'Commercial Development',
-        'Convenience Store',
-        'Data Center',
-        'Distribution Warehouse',
-        'Factory',
-        'Farm',
-        'Garage',
-        'Guest House',
-        'Hairdresser/Barber Shop',
-        'Healthcare Facility',
-        'Heavy Industrial',
-        'High Street Retail Property',
-        'Hotel',
-        'Hotel Apartment',
-        'Industrial Development',
-        'Industrial Park',
-        'Leisure Facility',
-        'Marine Property',
-        'Mill',
-        'Mixed Use Project',
-        'Nightclub',
-        'Office',
-        'Out of Town Retail Property',
-        'Petrol Station',
-        'Place of Worship',
-        'Post Office',
-        'Pub',
-        'Research Development Facility',
-        'Residential Development',
-        'Restaurant',
-        'Science Park',
-        'Serviced Office',
-        'Shop',
-        'Shopping center',
-        'Shopping mall',
-        'Showroom',
-        'Storage',
-        'Trade counter',
-        'Warehouse',
-        'Workshop',
-        'Bank Owned',
-        'Land',
-        'Residential',
-        'Commercial',
-        'Tourist',
-        'Industrial',
-        'Agricultural',
-        'Farm',
-        'Other',
-        'Building',
-        'Office',
-        'Shop',
-        'Hotel',
-        'Commercial'
-    ]
-
+    keywords = ['Apartment', 'House', 'Hotel', 'Land', 'Residential', 'Commercial', 'Industrial', 'Farm']
     name_lower = name.lower()
     for keyword in keywords:
         if keyword.lower() in name_lower:
@@ -217,7 +143,6 @@ def get_property_data(url):
     except GeocoderTimedOut:
         print(f"Geocoding timed out for address: {address}")
 
-    # Combine all data into a dictionary
     property_data = {
         'url': url,
         'name': name,
@@ -234,20 +159,17 @@ def get_property_data(url):
     return property_data
 
 def scrape_properties(base_url):
-    # Get the total number of pages
     total_pages = get_total_pages(base_url.format(1))
     print(f"Total number of pages: {total_pages}")
 
-    # Collect property links from all pages
     all_property_links = set()
     for page in range(1, total_pages + 1):
         page_url = base_url.format(page)
         property_links = get_property_links_from_page(page_url)
         all_property_links.update(property_links)
         print(f"Scraped {len(property_links)} properties from page {page}")
-        time.sleep(delay_between_requests)  # Delay between page requests
+        time.sleep(delay_between_requests)
 
-    # Scrape data from each property URL
     all_property_data = []
     for link in all_property_links:
         property_data = get_property_data(link)
@@ -255,25 +177,24 @@ def scrape_properties(base_url):
         if property_data:
             all_property_data.append(property_data)
             print(f"Scraped data for property: {property_data['name']}")
-            time.sleep(delay_between_requests)  # Delay between property requests
+            time.sleep(delay_between_requests)
 
     return all_property_data
 
 def main(urls):
+    os.makedirs('artifacts', exist_ok=True)
+
     for url in urls:
         base_url = re.sub(r'page-\d+', 'page-{}', url)
         property_data = scrape_properties(base_url)
 
-        # Create a DataFrame to display the data side by side
         df = pd.DataFrame(property_data)
         print(df)
 
-        # Save the DataFrame to an Excel file in the 'artifacts' directory
-        file_name = 'artifacts/' + re.sub(r'\W+', '_', url) + '.xlsx'
+        file_name = f"artifacts/{re.sub(r'\\W+', '_', url)}.xlsx"
         df.to_excel(file_name, index=False)
         print(f"Data saved to {file_name}")
 
-# List of URLs to scrape
 urls = [
     'https://www.buysellcyprus.com/properties-for-sale/cur-usd/sort-ru/page-1',
 ]
