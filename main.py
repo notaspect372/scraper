@@ -191,10 +191,12 @@ def main(urls):
         df = pd.DataFrame(property_data)
         print(df)
 
+        # Save each DataFrame as an Excel file in the artifacts directory
         file_name = f"artifacts/{re.sub(r'\\W+', '_', url)}.xlsx"
         df.to_excel(file_name, index=False)
         print(f"Data saved to {file_name}")
 
+# List of URLs to scrape
 urls = [
     'https://www.buysellcyprus.com/properties-for-sale/cur-usd/sort-ru/page-1',
 ]
