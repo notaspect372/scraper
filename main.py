@@ -49,7 +49,7 @@ def scrape_property_urls(base_url):
 
         # Iterate through each page and scrape property URLs, with a limit for testing
         for page in range(1, min(total_pages + 1, 40)):  # Limit to 40 pages for testing
-            page_url = f"{base_url}&page={page}"
+            page_url = f"{base_url}?page={page}"
             page_response = fetch_page(page_url)
             if page_response:
                 page_soup = BeautifulSoup(page_response.content, "html.parser")
