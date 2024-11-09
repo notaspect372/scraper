@@ -5,7 +5,6 @@ import math
 import re
 import pandas as pd
 from urllib.parse import urlparse, urljoin
-import os
 
 # Function to scrape property URLs from a base URL
 def scrape_property_urls(base_url):
@@ -23,10 +22,10 @@ def scrape_property_urls(base_url):
     # Calculate the total number of pages (assuming 20 listings per page)
     listings_per_page = 20
     total_pages = math.ceil(number_of_listings / listings_per_page)
-    print(total_pages)
+    print(f"Total pages: {total_pages}")
 
-    # Initialize a list to store all property URLs
-    all_property_urls = []
+    # Initialize a set to store all property URLs (to remove duplicates)
+    all_property_urls = set()
 
     # Iterate through each page and scrape property URLs
     for page in range(1, total_pages + 1):
@@ -39,8 +38,7 @@ def scrape_property_urls(base_url):
             anchor_tag = item.find("a", href=True)
             if anchor_tag:
                 property_url = urljoin(base_url, anchor_tag["href"])
-                print(len(property_url))
-                all_property_urls.append(property_url)
+                all_property_urls.add(property_url)
 
     return all_property_urls
 
