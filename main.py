@@ -1,159 +1,190 @@
 import requests
 from bs4 import BeautifulSoup
-import json
+import pandas as pd
 import math
 import re
-import pandas as pd
-from urllib.parse import urlparse, urljoin
-import os
+from urllib.parse import urlparse
+from openpyxl import load_workbook
+from openpyxl.styles import Font
+from geopy.geocoders import Nominatim
 import time
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+import os
 
-# Set up session with retries
-session = requests.Session()
-retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
-session.mount("https://", HTTPAdapter(max_retries=retries))
+# Headers to mimic browser requests
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'}
 
-# Function to fetch a page with retry and timeout
-def fetch_page(url):
+# Initialize geolocator
+geolocator = Nominatim(user_agent="property_scraper")
+
+start_urls = [
+    "https://www.bproperty.com/rent/residential/under-14000/"
+]
+
+# Function to perform requests with manual retry logic
+def get_with_retry(url, retries=5, delay=2):
+    attempt = 0
+    while attempt < retries:
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                return response
+            else:
+                print(f"Failed with status code {response.status_code}. Retrying...")
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching {url}: {e}. Retrying...")
+        attempt += 1
+        time.sleep(delay)  # Delay between retries
+    return None
+
+def get_total_pages(url):
     try:
-        response = session.get(url, timeout=20)
-        response.raise_for_status()
-        return response
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching {url}: {e}")
+        response = get_with_retry(url)
+        if response is None:
+            return 1
+        soup = BeautifulSoup(response.content, 'html.parser')
+        total_listing_selector = 'span.CountTitle-number'
+        total_listing_text = soup.select_one(total_listing_selector).get_text(strip=True).split()[0]
+        total_listing = int(total_listing_text.replace(',', ''))
+        page_listing = 30  # Assuming 30 listings per page
+        total_pages = math.ceil(total_listing / page_listing)
+        return total_pages
+    except Exception as e:
+        print(f"Error fetching total pages for {url}: {e}")
+        return 1
+
+def get_geolocation(address):
+    try:
+        location = geolocator.geocode(address, timeout=10)
+        if location:
+            return location.longitude, location.latitude
+        return None, None
+    except Exception as e:
+        print(f"Error getting geolocation for address {address}: {e}")
+        return None, None
+
+def parse_property(url, property_type):
+    try:
+        response = get_with_retry(url)
+        if response is None:
+            return None
+        soup = BeautifulSoup(response.content, 'html.parser')
+        item = {}
+
+        name_selector = 'h1.Title-pdp-title span'
+        price_selector = 'span.FirstPrice'
+        description_selector = 'div.ViewMore-text-description'
+
+        item['name'] = soup.select_one(name_selector).get_text(strip=True) if soup.select_one(name_selector) else ''
+        address = soup.find('p', class_='Location')
+        item['address'] = address.text.strip() if address else 'N/A'
+        item['price'] = soup.select_one(price_selector).get_text(strip=True) if soup.select_one(price_selector) else ''
+        item['description'] = soup.select_one(description_selector).get_text(strip=True) if soup.select_one(description_selector) else ''
+
+        characteristics = {}
+        characteristics_container = soup.find('div', class_='listing-section listing-details')
+        if characteristics_container:
+            details_rows = characteristics_container.find_all('div', class_='columns-2')
+            for row in details_rows:
+                label_div = row.find('div', class_='listing-details-label')
+                value_div = row.find('div', class_='last')
+                if label_div and value_div:
+                    label = label_div.get_text(strip=True).lower().replace(' ', '_')
+                    value = value_div.get_text(strip=True)
+                    characteristics[label] = value
+
+        item['characteristics'] = characteristics
+        item['area'] = characteristics.get('floor_area(sqft)', 'N/A')
+
+        # Transaction type
+        if 'buy' in url:
+            item['transaction_type'] = 'for sale'
+        elif 'rent' in url:
+            item['transaction_type'] = 'for rent'
+        else:
+            item['transaction_type'] = 'unknown'
+
+        # Use provided property type
+        item['property_type'] = property_type
+        item['property_url'] = url
+
+        address = item.get('address', '')
+        longitude, latitude = get_geolocation(address)
+        item['longitude'] = longitude
+        item['latitude'] = latitude
+
+        print(item)
+        return item
+    except Exception as e:
+        print(f"Error parsing property data from {url}: {e}")
         return None
 
-# Function to scrape property URLs from a base URL
-def scrape_property_urls(base_url):
-    response = fetch_page(base_url)
-    if response:
-        soup = BeautifulSoup(response.content, "html.parser")
+def parse_page(url, property_type, items):
+    try:
+        response = get_with_retry(url)
+        if response is None:
+            return
+        soup = BeautifulSoup(response.content, 'html.parser')
+        property_url_selector = 'a.ListingCell-ListingLink.js-listing-link'
+        property_urls = [a['href'] for a in soup.select(property_url_selector)]
+        for property_url in property_urls:
+            item = parse_property(property_url, property_type)
+            if item:
+                items.append(item)
+        time.sleep(2)  # Adding delay to mimic human interaction
+    except Exception as e:
+        print(f"Error parsing page {url}: {e}")
 
-        # Find the number of listings to calculate pagination
-        search_subtitle_div = soup.find("div", class_="a-search-subtitle search-results-nb")
-        if search_subtitle_div:
-            number_of_listings = int(search_subtitle_div.find("span").text.strip().replace(" ", ""))
-        else:
-            print("Could not find the number of listings.")
-            number_of_listings = 1
+def save_to_excel(base_url, items):
+    # Ensure the artifacts directory exists
+    os.makedirs('artifacts', exist_ok=True)
+    
+    # Create a safe filename for the Excel file
+    parsed_url = urlparse(base_url)
+    safe_filename = re.sub(r'\W+', '_', parsed_url.netloc + parsed_url.path) + '.xlsx'
+    file_path = os.path.join('artifacts', safe_filename)
+    
+    # Save the DataFrame to Excel
+    df = pd.DataFrame(items)
+    df.to_excel(file_path, index=False)
 
-        # Calculate the total number of pages (assuming 20 listings per page)
-        listings_per_page = 20
-        total_pages = math.ceil(number_of_listings / listings_per_page)
-        print(f"Total pages: {total_pages}")
+    # Load workbook and apply formatting
+    wb = load_workbook(file_path)
+    ws = wb.active
 
-        # Initialize a set to store all property URLs (to remove duplicates)
-        all_property_urls = set()
+    # Bold header row
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
 
-        # Iterate through each page and scrape property URLs, with a limit for testing
-        for page in range(1, min(total_pages + 1, 40)):  # Limit to 40 pages for testing
-            page_url = f"{base_url}?page={page}"
-            page_response = fetch_page(page_url)
-            if page_response:
-                page_soup = BeautifulSoup(page_response.content, "html.parser")
+    # Adjust column width
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = max_length + 2
+        ws.column_dimensions[column].width = adjusted_width
 
-                # Find all divs with class "hot__item" and extract href from <a> tags
-                for item in page_soup.find_all("div", class_="hot__item"):
-                    anchor_tag = item.find("a", href=True)
-                    if anchor_tag:
-                        property_url = urljoin(base_url, anchor_tag["href"])
-                        all_property_urls.add(property_url)
-            time.sleep(2)  # Delay between requests
+    wb.save(file_path)
 
-        return all_property_urls
-    else:
-        print("Failed to retrieve base URL.")
-        return set()
+def determine_property_type(url):
+    if 'residential' in url or 'commercial' in url:
+        return 'residential' if 'residential' in url else 'commercial'
+    return 'unknown'
 
-# Function to scrape data from each property URL
-def scrape_property_data(property_urls):
-    property_data = []
-
-    for property_url in property_urls:
-        property_response = fetch_page(property_url)
-        if property_response:
-            property_soup = BeautifulSoup(property_response.content, "html.parser")
-
-            # Extract JSON data from <script id="jsdata"> tag
-            script_tag = property_soup.find("script", id="jsdata")
-            if script_tag:
-                script_text = script_tag.string.strip()
-                json_str = re.search(r"window\.data\s*=\s*({.*});", script_text)
-                if json_str:
-                    json_data = json.loads(json_str.group(1))
-
-                    # Extract required details
-                    advert = json_data.get("advert", {})
-                    map_data = advert.get("map", {})
-                    address_data = advert.get("address", {})
-
-                    name = advert.get("title")
-                    address = f"{address_data.get('city')}, {address_data.get('street')} {address_data.get('house_num')}"
-                    price = advert.get("price")
-                    latitude = map_data.get("lat")
-                    longitude = map_data.get("lon")
-                    property_type = advert.get("categoryAlias")
-                    transaction_type = advert.get("sectionAlias")
-                    area = advert.get("square")
-                    characteristics = f"Rooms: {advert.get('rooms')}"
-
-                    # Scrape description from <meta name="description">
-                    meta_description_tag = property_soup.find("meta", attrs={"name": "description"})
-                    description = meta_description_tag["content"] if meta_description_tag else "No description available"
-
-                    details_div = property_soup.find("div", class_="offer__short-description")
-                    property_details = {}
-                    if details_div:
-                        for item in details_div.find_all("div", class_="offer__info-item"):
-                            title = item.find("div", class_="offer__info-title").text.strip()
-                            value = item.find("div", class_="offer__advert-short-info").text.strip()
-                            property_details[title] = value
-
-                    # Append scraped data to property_data list
-                    property_data.append({
-                        "URL": property_url,
-                        "Name": name,
-                        "Address": address,
-                        "Price": price,
-                        "Description": description,
-                        "Latitude": latitude,
-                        "Longitude": longitude,
-                        "Property Type": property_type,
-                        "Transaction Type": transaction_type,
-                        "Area": area,
-                        "Characteristics": characteristics,
-                        "Properties": property_details
-                    })
-                else:
-                    print(f"Failed to extract JSON from script content on {property_url}")
-            else:
-                print(f"No 'jsdata' script tag found on {property_url}")
-        time.sleep(1)  # Additional delay between property requests
-
-    return property_data
-
-# Main function to scrape URLs and data
 def main():
-    base_url = "https://krisha.kz/arenda/garazhi/"
-    property_urls = scrape_property_urls(base_url)
+    for url in start_urls:
+        property_type = determine_property_type(url)
+        total_pages = get_total_pages(url)
+        items = []
+        for page in range(1, total_pages + 1):
+            parse_page(f"{url}?page={page}", property_type, items)
+            time.sleep(1)  # To prevent rate limiting
+        save_to_excel(url, items)
 
-    if property_urls:
-        print(f"Total property URLs found: {len(property_urls)}")
-        property_data = scrape_property_data(property_urls)
-
-        # Convert data into a DataFrame and save to Excel
-        df = pd.DataFrame(property_data)
-        parsed_url = urlparse(base_url)
-        safe_url_name = parsed_url.netloc.replace(".", "_") + parsed_url.path.replace("/", "_")
-        os.makedirs("artifacts", exist_ok=True)
-        excel_filename = f"artifacts/{safe_url_name}.xlsx"
-        df.to_excel(excel_filename, index=False)
-        print(f"Data saved to {excel_filename}")
-    else:
-        print("No property URLs found.")
-
-# Run the main function
 if __name__ == "__main__":
     main()
