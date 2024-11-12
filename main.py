@@ -154,7 +154,7 @@ def scrape_properties_from_urls(base_urls):
 
 # Example usage
 base_urls = [
-    "https://ghanapropertycentre.com/for-sale?q=for-sale",
+    "https://ghanapropertycentre.com/for-sale",
     # Add more URLs if needed
 ]
 
