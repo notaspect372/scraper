@@ -31,7 +31,7 @@ headers = {
 
 cookies = {
     "cf_clearance": "Oh0902T.bmkktoMePJQGxwBOQTw6WaTKswHWRhAI3Mc-1731413990-1.2.1.1-zfqEraO0fmo38RvMHS7SIsLP61cbsw_1pjbH1Wv_1I8wXsHsgTn5unckGtCiogvCLlr_2Xermloqd0Qj3BafMT54QRyyETM4qeVXtDkjmqfTx0hLy9r219sHX5aL6rZ6aPxE0Ax1FKT8r59rViK848ZdFhCMCT5icwSGnP90roy88kceJaZnGBGw2pCUGNnO02lLx62_mQK.V29tRwAcj6JHMGM2yadYVhTg20ifjNYsrPsrDLFQIuIjls8G7Hvj.mntyxCAbC5dRbv2SKMFpseHby_TK4Mjd2PxpiR93PMPXFpRV_IIn3LQIJ1wkEVLJP7gOZPAXieHap3lkKcx6otzaKoqSXOeUxDGZHzDCd0P1_x__oMakMV6YgiX8cF3vyW3yuCYuIIT4xC8r6M29PMkv.1NNnXE45MBJIuN1RpNPU9hiCWZAnCwz9m.LHEh",
-    "XSRF-TOKEN": "eyJpdiI6IktrS0FtNU1OK2c2WUdpeDBhZVNNSnc9PSIsInZhbHVlIjoiYi9zelRUT0drVnpzNWNkSGUzZ3BLK1FxSmxMS2xZeVVjUDdEZGpsK3BIN0JBbWM3dFYvQnIvRVhKbG51WmxsM3hwemJZV3VjeEFDcUhlaXV6Y2R3aGY2LzJocS9vUkxnUEN2d0hJeWI2V0xOVmVlVUE0SFNEZkR1UCtlU2V1cDkiLCJtYWMiOiI1MDMyNzJkYzMyMTVjYjBhOTI5NjRjOTM4ZjU3YmRlZWEzYjNiNmY2ZDg4YzE2NTkyZmI1YzgxNjI4NWY3OTM0IiwidGFnIjoiIn0%3D"
+    "XSRF-TOKEN": "eyJpdiI6IkVrUGZTM1BRU0dyRDdjNXkyNjVLVlE9PSIsInZhbHVlIjoiQm5kRG81N0UzUktpREQySDEzRGNGWHI1UnlwUXdGOTZyOGo4WC9iMXJialhWTnpHYjZHZzFhQnp2U2o1enhpaEVNcWM2NkxCY2lkcUJvL2ZJcHc1MW1XOTFwNzFsd1NrbEdOQTdiREtRUnMwL3E3RjE2MGdvTzJFYzlwSCtuWDAiLCJtYWMiOiJlZTdiNTZhNzA5NmQ0ZGRhNTNkYTA0NmJjNWYyMTJlZDljMWUxNDZmOGFiNWQzNzJmOWJmZWEyMTQ0MDljMWFmIiwidGFnIjoiIn0%3D"
 }
 def get_lat_lon(address, retries=3, delay_between_retries=2):
     geolocator = Nominatim(user_agent="property_scraper", timeout=10)
@@ -56,9 +56,18 @@ def scrape_property_details(property_url):
     soup = BeautifulSoup(response.content, 'html.parser')
     
     transaction_type = "sale" if "sale" in property_url.lower() else "rent"
-    name = soup.find('h4', class_='content-title').text.strip()
-    description = soup.find('p', itemprop='description').text.strip()
-    address = soup.find('address').text.strip()
+    
+    # Check if the title element exists
+    name_element = soup.find('h4', class_='content-title')
+    name = name_element.text.strip() if name_element else "N/A"  # Use "N/A" if not found
+    
+    # Check if the description element exists
+    description_element = soup.find('p', itemprop='description')
+    description = description_element.text.strip() if description_element else "N/A"
+    
+    # Check if the address element exists
+    address_element = soup.find('address')
+    address = address_element.text.strip() if address_element else "N/A"
     
     price_span = soup.find('span', class_='pull-right property-details-price')
     if price_span:
@@ -73,17 +82,18 @@ def scrape_property_details(property_url):
     characteristics = {}
     area = None
     property_type = None
-    for row in characteristics_table.find_all('tr'):
-        for cell in row.find_all('td'):
-            strong = cell.find('strong')
-            if strong:
-                key = strong.text.strip().replace(':', '')
-                value = cell.text.replace(strong.text, '').strip()
-                characteristics[key] = value
-                if key == "Total Area":
-                    area = value
-                if key == "Type":
-                    property_type = value
+    if characteristics_table:
+        for row in characteristics_table.find_all('tr'):
+            for cell in row.find_all('td'):
+                strong = cell.find('strong')
+                if strong:
+                    key = strong.text.strip().replace(':', '')
+                    value = cell.text.replace(strong.text, '').strip()
+                    characteristics[key] = value
+                    if key == "Total Area":
+                        area = value
+                    if key == "Type":
+                        property_type = value
 
     covered_area = characteristics.get("Covered Area", "")
 
