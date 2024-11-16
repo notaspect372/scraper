@@ -30,8 +30,8 @@ headers = {
 }
 
 cookies = {
-    "cf_clearance": "xNtkBBcDGJD1eGdMh_FdglWVHPFKnff_kikxZbiiFqM-1731656073-1.2.1.1-RqFB.E7mgUQjbP5nUycWse7qbO.c0Fgj6N896.pvB8_K8QQZ1plxUz84Fg7mGEWewcs_x409ib0SwMcOW6gLAeiBY5ZZUSMFYhzgx7nzHnhNIjdsKwz_61OBpFYxzeRIpLyKv9staeMa8heX1dB8nAV1bRk5CcpbbUMR0cCBcxPuCUT4eEANqlgGWEsMjWOgg8ES1BsTx3nxJX3OOpBWQVjTlsWHmUNOBYh0FjN0duyrqUaLtMNIbrXhS8Bp6vXp.vB76sez564K6DXF9BIbi3_EXBGtwZHjVFEGexBnd_z850TziPNpvfpc_cSwv0GDfrQTY0EwlWudF7uIRcYZ.aUIJMMsFSV4tLpd96EcGAgQXFANb.TkoVCa.1zUYvYKawzmEKpdlOz2ku0jvL1GGvUtIu6dEoHEuVEA2TCa8T6.7KCvIVHXKCgyhd._.Ikf",
-    "XSRF-TOKEN": "eyJpdiI6ImtZNndUSWVYa1hHR1FVd0dkTmlXYmc9PSIsInZhbHVlIjoiYlgvM29iNE5mYXd3azJ6d2g3ZXplYnpzdHd2eTVCWGh0aFBMU004YlF5OTNlaDF1TTgrVkFENUhZZmVZcWpybG5YbXd0bkU4dE9TdUdTOFhTNVlQeXluLzA5eUlnZE1RemJuYk5tVlRnZFlIZmd1bUc5SDRyOW5UREYrdDg2Y00iLCJtYWMiOiJjYTUzNmM4NzE3NDcwZjZhYWZjM2U4M2ZkOTQ4ZjM3OWNlZWQ4MWE1OTQyYWI3ZDhiMDNkYTAwMmRkMWE0NWNiIiwidGFnIjoiIn0%3D"
+    "cf_clearance": "BL1MYzMpRy9xXcFcAi2mRNM4Pou0oQ.DybnWIWJP7vg-1731740117-1.2.1.1-RtrrdpChACo0oz1Qv.k7FY8Kk6FM1jBOTBZtEcQEfppINOrJRTt3l._pl9UscrKM.8ldO8b8HJeKOwtkqM0pKw3Yc6uZXqYp.ft0o3CHS3a_YdYNnCNxU1LI7K1otovACG9dvRP8yJ9HjTNbBE83Pa8ICD1iGTUwERvJjk2s8RQcGW41wwAI5l2jN057FIpDzAQimCStI8MZaUtTJB_L.nmLfFjtE8L1._5YPcTDBnayN2otEz4qS.QKG_lG9eQHB9i0vYRp_00CryZObG.x.iVFnt7S8_5ah.XjcX20varF_d5Q9nVxaKX35T4QavF_uaKECXJ7lZSnTOmMXX_CA7qakBA0Dqq21LaRj7_kIp3BdThKI5ZPZXK8ggxuAe8slsGdYztipWmC0damgk8S6d9JY8C.FVwsNoM8oBoWywyh8t9.WwwCZIuCoIZEpBlp",
+    "XSRF-TOKEN": "eyJpdiI6IkJIRTc3VzhiRi9NdmZNaEFNWjF0eXc9PSIsInZhbHVlIjoiWUxKbE5uYzQ4UU1LV282WmozREFKdEQvN0h4Qlp6S0x4ZGxDOHFvdUhJaVhRLytZUFVPend5aWRtaEpycjBzTUVkMWR0RWRVeExmSVdvWnlKcjBtaXFqZm5NUFJXQjNEZVdXRk90a01BSVdFTk1rMmw4azJtUXh5dmFJMmp3K3UiLCJtYWMiOiJjMWU5YjhkY2MxYjkxYWVlMTYzYmNhMGFmNjBkM2QxYzRmMDY2MGU1MmRjYzA2ODg1ZTkwZGY1MjFkOWNmOGZhIiwidGFnIjoiIn0%3D"
 }
 def get_lat_lon(address, retries=3, delay_between_retries=2):
     geolocator = Nominatim(user_agent="property_scraper", timeout=10)
@@ -164,7 +164,7 @@ def scrape_properties_from_urls(base_urls):
 
 # Example usage
 base_urls = [
-    "https://ghanapropertycentre.com/for-rent/short-let?q=for-rent+short-let",
+    "https://ghanapropertycentre.com/for-rent/short-let",
     # Add more URLs if needed
 ]
 
