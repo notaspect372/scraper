@@ -191,7 +191,7 @@ def main():
         items = []
         seen_urls = set()  # Initialize a set for tracking seen URLs
         for page in range(1, total_pages + 1):
-            parse_page(f"{url}?page={page}", property_type, items, seen_urls)
+            parse_page(f"{url}&page={page}", property_type, items, seen_urls)
             time.sleep(1)  # To prevent rate limiting
         save_to_excel(url, items)
 
