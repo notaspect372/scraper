@@ -18,7 +18,7 @@ headers = {
 geolocator = Nominatim(user_agent="property_scraper")
 
 start_urls = [
-    "https://www.bproperty.com/rent/residential/?price=14000-20000"
+    "https://www.bproperty.com/buy/commercial/"
 ]
 
 # Function to perform requests with manual retry logic
