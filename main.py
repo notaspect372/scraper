@@ -18,7 +18,7 @@ headers = {
 geolocator = Nominatim(user_agent="property_scraper")
 
 start_urls = [
-    "https://www.bproperty.com/rent/commercial/under-70000/"
+    "https://www.bproperty.com/rent/commercial/?price=70000-250000"
 ]
 
 # Function to perform requests with manual retry logic
@@ -183,6 +183,15 @@ def determine_property_type(url):
         return 'residential' if 'residential' in url else 'commercial'
     return 'unknown'
 
+def construct_pagination_url(base_url, page):
+    """
+    Constructs the pagination URL based on whether the base URL contains a '?'.
+    """
+    if '?' in base_url:
+        return f"{base_url}&page={page}"
+    else:
+        return f"{base_url}?page={page}"
+
 def main():
     for url in start_urls:
         print(url)
@@ -190,10 +199,14 @@ def main():
         total_pages = get_total_pages(url)
         items = []
         seen_urls = set()  # Initialize a set for tracking seen URLs
+        
         for page in range(1, total_pages + 1):
-            parse_page(f"{url}&page={page}", property_type, items, seen_urls)
+            paginated_url = construct_pagination_url(url, page)
+            parse_page(paginated_url, property_type, items, seen_urls)
             time.sleep(1)  # To prevent rate limiting
+        
         save_to_excel(url, items)
 
 if __name__ == "__main__":
     main()
+
