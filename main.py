@@ -5,7 +5,7 @@ import math
 import os
 
 # Input and output file paths
-input_file = "artifacts/brands_links.csv"  # Adjusted to match CI environment
+input_file = "brands_links.csv"
 output_file = "artifacts/scraped_data.xlsx"
 
 # Ensure the artifacts directory exists
