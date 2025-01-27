@@ -345,7 +345,7 @@ def scrape_data(brand_array):
 
 
 # enter the brand urls here
-brands = ["https://floorscenter.com/collections/american-olean "]
+brands = ["https://floorscenter.com/collections/ms-international"]
 
 
 scrape_data(brands)
