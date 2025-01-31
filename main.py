@@ -6,9 +6,13 @@ import pandas as pd
 import time
 import os
 
-
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# ---------------------------
+# Parameters for pagination
+START_PAGE = 1   # Set your desired starting page number
+END_PAGE = 100     # Set your desired ending page number
 
 def get_property_urls(soup):
     # Find all 'a' tags with the specific class used for property links
@@ -23,7 +27,6 @@ def build_next_page_url(base_url, page_num):
         # If no query parameters, just append pagination to the URL
         return f"{base_url}/page/{page_num}/"
 
-
 def extract_characteristics(soup):
     characteristics = {}
     detail_wrap = soup.find('div', class_='detail-wrap')
@@ -31,12 +34,10 @@ def extract_characteristics(soup):
         for li in detail_wrap.find_all('li'):
             strong_tag = li.find('strong')
             span_tag = li.find('span')
-
             if strong_tag and span_tag:  # Ensure both elements exist before accessing them
                 label = strong_tag.get_text(strip=True).rstrip(':')
                 value = span_tag.get_text(strip=True)
                 characteristics[label] = value
-
     return characteristics
 
 def get_location(geolocator, address, retries=3):
@@ -49,8 +50,6 @@ def get_location(geolocator, address, retries=3):
                 continue
             else:
                 return None
-
-
 
 def scrape_property_details(url):
     try:
@@ -83,9 +82,8 @@ def scrape_property_details(url):
                 description = description_content.text.strip()
         
         # Extract characteristics
-        characteristics = extract_characteristics(soup)  # Ensure this is defined before use
-        
-        transaction_type = characteristics.get("Property Status", "N/A")  # Now characteristics will be defined
+        characteristics = extract_characteristics(soup)
+        transaction_type = characteristics.get("Property Status", "N/A")
         property_type = characteristics.get('Property Type', None)
 
         latitude, longitude = None, None
@@ -94,7 +92,6 @@ def scrape_property_details(url):
             location = get_location(geolocator, sub_address)
             if location:
                 latitude, longitude = location.latitude, location.longitude
-
 
         amenities = []
         amenities_wrap = soup.find('div', id='property-features-wrap')
@@ -113,7 +110,7 @@ def scrape_property_details(url):
             'address': address_details,
             'transaction_type': transaction_type,
             'area': characteristics.get("Property Size", "N/A"),
-            "amenities":amenities,
+            'amenities': amenities,
             'property_type': property_type,
             'latitude': latitude,
             'longitude': longitude,
@@ -123,59 +120,52 @@ def scrape_property_details(url):
         print(f"Error scraping {url}: {e}")
         return None
 
-def scrape_properties(base_url):
+def scrape_properties(base_url, start_page, end_page):
     all_property_urls = []
-    page_num = 1
-    consecutive_404_errors = 0
 
-    while consecutive_404_errors < 3:
+    # Loop only over the user-defined page range
+    for page_num in range(start_page, end_page + 1):
         url = build_next_page_url(base_url, page_num)
         try:
             response = requests.get(url)
             if response.status_code == 404:
-                consecutive_404_errors += 1
-                print(f"Encountered 404 error on {url}, count: {consecutive_404_errors}")
+                print(f"Encountered 404 error on {url}. Skipping this page.")
                 continue
-            else:
-                consecutive_404_errors = 0
-
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
             property_urls = get_property_urls(soup)
             if not property_urls:
-                print(f"No property URLs found on {url}. Stopping pagination.")
-                break
-            print(f'Scraped {len(property_urls)} properties from {url}')
-            all_property_urls.extend(property_urls)
-            page_num += 1
-
+                print(f"No property URLs found on {url}.")
+            else:
+                print(f'Scraped {len(property_urls)} properties from {url}')
+                all_property_urls.extend(property_urls)
         except requests.exceptions.RequestException as e:
             print(f"Error requesting page {url}: {e}")
-            consecutive_404_errors += 1
             continue
 
     properties_data = []
     for property_url in all_property_urls:
         details = scrape_property_details(property_url)
-        print(details)
         if details:
             properties_data.append(details)
             print(f"Scraped details for {property_url}")
 
     return properties_data
 
-# List of URLs to scrape
+# List of base URLs to scrape
 urls = [
     "https://real-estate-tanzania.beforward.jp/status/for-sale",
-
+    # Add more URLs as needed
 ]
 
-
 for base_url in urls:
-    properties_data = scrape_properties(base_url)
-    df = pd.DataFrame(properties_data)
-    url_filename = base_url.split('/')[2].replace(".", "_")  # Creating a valid filename from URL
-    file_path = os.path.join(OUTPUT_DIR, f"{url_filename}.xlsx")
-    df.to_excel(file_path, index=False)
-
-    print(f"Data saved to {file_path}")
+    properties_data = scrape_properties(base_url, START_PAGE, END_PAGE)
+    if properties_data:
+        df = pd.DataFrame(properties_data)
+        # Create a valid filename from the base URL's domain
+        url_filename = base_url.split('/')[2].replace(".", "_")
+        file_path = os.path.join(OUTPUT_DIR, f"{url_filename}.xlsx")
+        df.to_excel(file_path, index=False)
+        print(f"Data saved to {file_path}")
+    else:
+        print(f"No data scraped from {base_url}")
