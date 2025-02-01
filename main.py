@@ -11,8 +11,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ---------------------------
 # Parameters for pagination
-START_PAGE = 101   # Set your desired starting page number
-END_PAGE = 600     # Set your desired ending page number
+START_PAGE = 601   # Set your desired starting page number
+END_PAGE = 1200     # Set your desired ending page number
 
 def get_property_urls(soup):
     # Find all 'a' tags with the specific class used for property links
