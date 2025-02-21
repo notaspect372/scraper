@@ -26,10 +26,10 @@ jobs:
 
     - name: Run scraper
       run: |
-        python main.py  # Adjusted to run main.py instead of scraper.py
+        python main.py  # Runs the scraper
 
     - name: Upload Excel files as artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: tanzania_601_1200
+        name: kosovo
         path: output/*.xlsx
