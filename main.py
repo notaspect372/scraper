@@ -158,7 +158,7 @@ def save_to_excel(data, filename="output/51_55.xlsx"):
 
 # Run the scraper
 if __name__ == "__main__":
-    start_page = 51
-    end_page = 55
+    start_page = 56
+    end_page = 58
     data = scrape_all_pages(start_page, end_page)
     save_to_excel(data)
