@@ -1,171 +1,164 @@
-import requests
-from bs4 import BeautifulSoup
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.edge.service import Service as EdgeService
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.edge.options import Options
+from webdriver_manager.microsoft import EdgeChromiumDriverManager
 import pandas as pd
 import time
+import re
+import logging
 import os
 
-OUTPUT_DIR = "output"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# ---------------------------
-# Parameters for pagination
-START_PAGE = 1201   # Set your desired starting page number
-END_PAGE = 1675     # Set your desired ending page number
-
-def get_property_urls(soup):
-    # Find all 'a' tags with the specific class used for property links
-    return [a['href'] for a in soup.find_all('a', class_='btn btn-primary btn-item')]
-
-def build_next_page_url(base_url, page_num):
-    if '?' in base_url:
-        # If there are query parameters, insert the pagination before them
-        base, query_params = base_url.split('?', 1)
-        return f"{base}/page/{page_num}/?{query_params}"
+def get_lat_long_from_google_maps(driver, address):
+    """Fetch latitude and longitude for a given address using Google Maps."""
+    search_url = f"https://www.google.com/maps/search/{address.replace(' ', '+')}"
+    driver.get(search_url)
+    time.sleep(5)  # Allow time for Google Maps to load
+    
+    # Extract the current URL after page load
+    current_url = driver.current_url
+    match = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", current_url)
+    if match:
+        return float(match.group(1)), float(match.group(2))
     else:
-        # If no query parameters, just append pagination to the URL
-        return f"{base_url}/page/{page_num}/"
+        logging.warning(f"Could not find coordinates for address: {address}")
+        return None, None
 
-def extract_characteristics(soup):
-    characteristics = {}
-    detail_wrap = soup.find('div', class_='detail-wrap')
-    if detail_wrap:
-        for li in detail_wrap.find_all('li'):
-            strong_tag = li.find('strong')
-            span_tag = li.find('span')
-            if strong_tag and span_tag:  # Ensure both elements exist before accessing them
-                label = strong_tag.get_text(strip=True).rstrip(':')
-                value = span_tag.get_text(strip=True)
-                characteristics[label] = value
-    return characteristics
+# Initialize the Edge WebDriver
+def init_driver():
+    options = Options()
+    options.use_chromium = True  # Use Chromium-based Edge
+    options.add_argument("--start-maximized")  # Start browser maximized
+    driver = webdriver.Edge(
+        service=EdgeService(EdgeChromiumDriverManager().install()),
+        options=options
+    )
+    return driver
 
-def get_location(geolocator, address, retries=3):
-    for i in range(retries):
-        try:
-            return geolocator.geocode(address, timeout=10)
-        except GeocoderTimedOut:
-            if i < retries - 1:
-                time.sleep(2)
-                continue
-            else:
-                return None
-
-def scrape_property_details(url):
+# Extract property URLs from a single page
+def extract_property_urls(driver):
+    property_urls = []
     try:
-        response = requests.get(url)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
+        property_elements = driver.find_elements(By.CSS_SELECTOR, ".property-box a.property-img")
+        for elem in property_elements:
+            url = elem.get_attribute("href")
+            property_urls.append(url)
+    except Exception as e:
+        print(f"Error extracting property URLs: {e}")
+    return property_urls
 
-        name = soup.find('meta', property='og:title')['content'] if soup.find('meta', property='og:title') else None
-        price = soup.find('li', class_='item-price').text.strip() if soup.find('li', class_='item-price') else None
+# Scrape property details from an individual property page
+def scrape_property_details(driver, url):
+    data = {"URL": url}
+    try:
+        driver.get(url)
+        time.sleep(3)  # Wait for the page to load
 
-        address_details = {}
-        address_wrap = soup.find('div', id='property-address-wrap')
-        if address_wrap:
-            address_elements = address_wrap.find_all('li')
-            for element in address_elements:
-                strong_tag = element.find('strong')
-                span_tag = element.find('span')
-                if strong_tag and span_tag:
-                    key = strong_tag.text.strip().lower().replace(" ", "_")  # Convert to lowercase with underscores
-                    value = span_tag.text.strip()
-                    address_details[key] = value
+        # Extract Name
+        name_element = driver.find_element(By.CSS_SELECTOR, ".heading-properties-3 h1")
+        data["Name"] = name_element.text
 
-        sub_address = address_details.get('city', None)
+        # Extract Price, Address, Transaction
+        details_element = driver.find_element(By.CSS_SELECTOR, ".heading-properties-3 .mb-30")
+        price = details_element.find_element(By.CSS_SELECTOR, ".property-price").text
+        transaction = details_element.find_element(By.CSS_SELECTOR, ".rent").text
+        address = details_element.find_element(By.CSS_SELECTOR, ".location").text
 
-        description = None
-        description_wrap = soup.find('div', class_='property-description-wrap property-section-wrap')
-        if description_wrap:
-            description_content = description_wrap.find('div', class_='block-content-wrap')
-            if description_content:
-                description = description_content.text.strip()
-        
-        # Extract characteristics
-        characteristics = extract_characteristics(soup)
-        transaction_type = characteristics.get("Property Status", "N/A")
-        property_type = characteristics.get('Property Type', None)
+        data["Price"] = price
+        data["Transaction"] = transaction
+        data["Address"] = address
 
-        latitude, longitude = None, None
-        if sub_address:
-            geolocator = Nominatim(user_agent="property_scraper")
-            location = get_location(geolocator, sub_address)
-            if location:
-                latitude, longitude = location.latitude, location.longitude
+        # Extract Description
+        description_element = driver.find_element(By.CSS_SELECTOR, ".properties-description.mb-40 p")
+        data["Description"] = description_element.text
 
-        amenities = []
-        amenities_wrap = soup.find('div', id='property-features-wrap')
-        if amenities_wrap:
-            amenities_list = amenities_wrap.find_all('li')
-            for amenity in amenities_list:
-                amenity_text = amenity.get_text(strip=True)
-                if amenity_text:
-                    amenities.append(amenity_text)
+        # Extract Characteristics
+        characteristics = {}
+        features = {}
+        table_elements = driver.find_elements(By.CSS_SELECTOR, ".floor-plans.mb-50 table")
+        if len(table_elements) >= 1:
+            char_rows = table_elements[0].find_elements(By.TAG_NAME, "tr")
+            for row in char_rows[1:]:
+                cols = row.find_elements(By.TAG_NAME, "td")
+                for i in range(len(cols)):
+                    characteristics[char_rows[0].find_elements(By.TAG_NAME, "td")[i].text.strip()] = cols[i].text.strip()
 
-        return {
-            'url': url,
-            'name': name,
-            'description': description,
-            'price': price,
-            'address': address_details,
-            'transaction_type': transaction_type,
-            'area': characteristics.get("Property Size", "N/A"),
-            'amenities': amenities,
-            'property_type': property_type,
-            'latitude': latitude,
-            'longitude': longitude,
-            'characteristics': characteristics
-        }
-    except requests.exceptions.RequestException as e:
-        print(f"Error scraping {url}: {e}")
-        return None
+        layout = {}
+        if len(table_elements) >= 2:
+            rows = table_elements[1].find_elements(By.TAG_NAME, "tr")
+            headers = [th.text.strip() for th in rows[0].find_elements(By.TAG_NAME, "td")]
+            values = [td.text.strip() for td in rows[1].find_elements(By.TAG_NAME, "td")]
+            layout = dict(zip(headers, values))
 
-def scrape_properties(base_url, start_page, end_page):
-    all_property_urls = []
+        data["Layout"] = layout
 
-    # Loop only over the user-defined page range
-    for page_num in range(start_page, end_page + 1):
-        url = build_next_page_url(base_url, page_num)
-        try:
-            response = requests.get(url)
-            if response.status_code == 404:
-                print(f"Encountered 404 error on {url}. Skipping this page.")
-                continue
-            response.raise_for_status()
-            soup = BeautifulSoup(response.content, 'html.parser')
-            property_urls = get_property_urls(soup)
+        # Extract Features
+        if len(table_elements) >= 2:
+            feature_rows = table_elements[1].find_elements(By.TAG_NAME, "tr")
+            for row in feature_rows[1:]:
+                cols = row.find_elements(By.TAG_NAME, "td")
+                for i in range(len(cols)):
+                    features[feature_rows[0].find_elements(By.TAG_NAME, "td")[i].text.strip()] = cols[i].text.strip()
+
+        data["Characteristics"] = characteristics
+        data["Features"] = features
+
+        data['Property Type'] = characteristics.get("Lloj", "-")
+        data['Area'] = features.get("Siperfaqe Bruto", "-")
+
+        # Extract latitude and longitude
+        data["Latitude"], data["Longitude"] = get_lat_long_from_google_maps(driver, address)
+
+    except Exception as e:
+        print(f"Error scraping details from {url}: {e}")
+    return data
+
+# Scrape properties from all pages
+def scrape_all_pages(start_page, end_page):
+    driver = init_driver()
+    base_url = "https://anem-ks.com/properties?business_type=sale"
+    all_properties = []
+    scraped_urls = set()
+
+    try:
+        for page_number in range(start_page, end_page + 1):
+            pagination_url = f"{base_url}&page={page_number}"
+            print(f"Scraping page {page_number}... : {pagination_url}")
+            driver.get(pagination_url)
+            time.sleep(3)  # Wait for the page to load
+
+            # Extract property URLs
+            property_urls = extract_property_urls(driver)
             if not property_urls:
-                print(f"No property URLs found on {url}.")
-            else:
-                print(f'Scraped {len(property_urls)} properties from {url}')
-                all_property_urls.extend(property_urls)
-        except requests.exceptions.RequestException as e:
-            print(f"Error requesting page {url}: {e}")
-            continue
+                print("No more properties found. Exiting...")
+                break
 
-    properties_data = []
-    for property_url in all_property_urls:
-        details = scrape_property_details(property_url)
-        if details:
-            properties_data.append(details)
-            print(f"Scraped details for {property_url}")
+            # Scrape each property
+            for url in property_urls:
+                if url not in scraped_urls:
+                    scraped_urls.add(url)
+                    property_data = scrape_property_details(driver, url)
+                    all_properties.append(property_data)
 
-    return properties_data
+    except Exception as e:
+        print(f"Error occurred during scraping: {e}")
 
-# List of base URLs to scrape
-urls = [
-    "https://real-estate-tanzania.beforward.jp/status/for-sale",
-    # Add more URLs as needed
-]
+    finally:
+        driver.quit()
 
-for base_url in urls:
-    properties_data = scrape_properties(base_url, START_PAGE, END_PAGE)
-    if properties_data:
-        df = pd.DataFrame(properties_data)
-        # Create a valid filename from the base URL's domain
-        url_filename = base_url.split('/')[2].replace(".", "_")
-        file_path = os.path.join(OUTPUT_DIR, f"{url_filename}.xlsx")
-        df.to_excel(file_path, index=False)
-        print(f"Data saved to {file_path}")
-    else:
-        print(f"No data scraped from {base_url}")
+    return all_properties
+
+# Save data to Excel in the 'output' folder
+def save_to_excel(data, filename="output/51_55.xlsx"):
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+    df = pd.DataFrame(data)
+    df.to_excel(filename, index=False)
+    print(f"Data saved to {filename}")
+
+# Run the scraper
+if __name__ == "__main__":
+    start_page = 51
+    end_page = 55
+    data = scrape_all_pages(start_page, end_page)
+    save_to_excel(data)
