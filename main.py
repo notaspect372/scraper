@@ -1,7 +1,6 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.edge.service import Service as EdgeService
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.edge.options import Options
 from webdriver_manager.microsoft import EdgeChromiumDriverManager
 import pandas as pd
@@ -9,6 +8,7 @@ import time
 import re
 import logging
 import os
+import tempfile
 
 def get_lat_long_from_google_maps(driver, address):
     """Fetch latitude and longitude for a given address using Google Maps."""
@@ -25,13 +25,16 @@ def get_lat_long_from_google_maps(driver, address):
         logging.warning(f"Could not find coordinates for address: {address}")
         return None, None
 
-# Initialize the Edge WebDriver
+# Initialize the Edge WebDriver with a unique user data directory
 def init_driver():
     options = Options()
     options.use_chromium = True  # Use Chromium-based Edge
     options.add_argument("--start-maximized")  # Start browser maximized
-    # Specify a unique user data directory to avoid conflicts
-    options.add_argument("--user-data-dir=/tmp/edge_profile")
+    
+    # Create a unique temporary directory for user data
+    user_data_dir = tempfile.mkdtemp(prefix="edge_profile_")
+    options.add_argument(f"--user-data-dir={user_data_dir}")
+    
     driver = webdriver.Edge(
         service=EdgeService(EdgeChromiumDriverManager().install()),
         options=options
