@@ -30,6 +30,8 @@ def init_driver():
     options = Options()
     options.use_chromium = True  # Use Chromium-based Edge
     options.add_argument("--start-maximized")  # Start browser maximized
+    # Specify a unique user data directory to avoid conflicts
+    options.add_argument("--user-data-dir=/tmp/edge_profile")
     driver = webdriver.Edge(
         service=EdgeService(EdgeChromiumDriverManager().install()),
         options=options
@@ -158,7 +160,7 @@ def save_to_excel(data, filename="output/51_55.xlsx"):
 
 # Run the scraper
 if __name__ == "__main__":
-    start_page = 56
-    end_page = 58
+    start_page = 51
+    end_page = 55
     data = scrape_all_pages(start_page, end_page)
     save_to_excel(data)
